@@ -1,37 +1,111 @@
 import json
 import requests
 import pandas
+from os import remove
+from os.path import join
+from tempfile import _get_candidate_names, gettempdir
 
+
+
+###################
 #### FUNCTIONS ####
-def get_or_exception(url_ : str, userListId_ : str):
-    response_ = requests.get(url_ % userListId_)
-    if not response_.ok:
-        raise Exception('Error getting gene list')
+###################
+# After: https://stackoverflow.com/questions/26541416/generate-temporary-file-names-without-creating-actual-file-in-python
+def get_tempfile_name(some_id : str = 'TEMP.txt'):
+    return join(next(_get_candidate_names()) + some_id)
 
-    data_ = json.loads(response_.text)
-    
+
+
+def get_or_exception(url_ : str, userListId_ : str = None, query_string_ : str = None, gene_set_library_ : str = None, gene_ : str = None, filename_ : str = None):
+    if url_ == 'http://amp.pharm.mssm.edu/Enrichr/view?userListId=%s':
+        response_ = requests.get(url_ % userListId_)
+        if not response_.ok:
+            raise Exception('Error getting gene list')
+
+        data_ = json.loads(response_.text)
+
+    elif url_ == 'http://amp.pharm.mssm.edu/Enrichr/enrich':
+        response_ = requests.get(
+            url_ + query_string_ % (userListId_, gene_set_library_)
+         )
+        if not response_.ok:
+            raise Exception('Error fetching enrichment results')
+
+        data_ = json.loads(response_.text)
+
+    elif url_ == 'http://amp.pharm.mssm.edu/Enrichr/genemap':
+        response_ = requests.get(url_ + query_string_ % gene_)
+        if not response_.ok:
+            raise Exception('Error searching for terms')
+
+        data_ = json.loads(response_.text)
+
+    elif url_ == 'http://amp.pharm.mssm.edu/Enrichr/export':
+        url = url_ + query_string_ % (userListId_, filename_, gene_set_library_)
+        response_ = requests.get(url, stream=True)
+
+        temp_filename = f'{gene_set_library_}__{get_tempfile_name()}'
+
+        with open(temp_filename, mode='w') as fp:
+             fp.write(response_.text)
+
+        data_ = pandas.read_csv(temp_filename, sep='\t')
+
+        data_['Database'] = gene_set_library_
+
+        remove(temp_filename)
+
+    else:
+        raise Exception('Bad url provided')
+
     return  data_
 
 
-# def get_or_exception(url_ : str, userListId_ : str):
-#     response_ = requests.get(url_ % userListId_)
-#     if not response_.ok:
-#         raise Exception('Error getting gene list')
-# 
-#     data_ = json.loads(response_.text)
-# 
-#     return  data_
-    
+
+def create_merged_df(userListId__ : str, databases_to_query_array, url__ : str = 'http://amp.pharm.mssm.edu/Enrichr/export',  query_string__ = '?userListId=%s&filename=%s&backgroundType=%s', ):
+    temp1 = pandas.DataFrame({})
+    for value in databases_to_query_array:
+        if temp1.empty:
+            temp1 = get_or_exception(url_ = url__, userListId_ = userListId__, query_string_ = query_string__, gene_set_library_ = value, filename_ = value)
+        else:
+            temp2 = get_or_exception(url_ = url__, userListId_ = userListId__, query_string_ = query_string__, gene_set_library_ = value, filename_ = value)
+
+            temp1 = temp1.append(temp2, sort=False)
+
+    return temp1
+
+
+
+def filter_results(df_, col_overlap_count : str = 'Overlap', col_genes_in_term : str = 'Genes_captured', regex_to_extract_number_from_overlap : str = '(.*)/', genes_in_term_cutoff : int = 2, col_p_val : str = 'P-value', p_val_cutoff = 0.05):
+    # Filter based on number of genes in given term
+    df_[col_genes_in_term] = df_[col_overlap_count].str.extract(regex_to_extract_number_from_overlap)
+    df_[col_genes_in_term] = pandas.to_numeric(df_[col_genes_in_term])
+    df_ = df_.loc[df_[col_genes_in_term] > genes_in_term_cutoff]
+    df_.pop(col_genes_in_term)
+
+    # Filter based on p-value
+    df_[col_p_val] = pandas.to_numeric(df_[col_p_val])
+    df_ = df_.loc[df_[col_p_val] < p_val_cutoff]
+
+    return df_
+
+###################
 #### FUNCTIONS ####
+###################
 
 
+
+##################
 #### METADATA ####
+##################
+
+#### ADRESSES ####
 enrichr_addlist = 'http://amp.pharm.mssm.edu/Enrichr/addList'
-enrichr_view = 'http://amp.pharm.mssm.edu/Enrichr/view?userListId=%s'
-enrichr_enrich = 'http://amp.pharm.mssm.edu/Enrichr/enrich'
-enrichr_genemap = 'http://amp.pharm.mssm.edu/Enrichr/genemap'
-enrichr_export = 'http://amp.pharm.mssm.edu/Enrichr/export'
-#### METADATA ####
+enrichr_view = 'http://amp.pharm.mssm.edu/Enrichr/view?userListId=%s' #Needs arguments: url_, userListId_
+enrichr_enrich = 'http://amp.pharm.mssm.edu/Enrichr/enrich' #Needs arguments: url_, userListId_, query_string_, gene_set_library_
+enrichr_genemap = 'http://amp.pharm.mssm.edu/Enrichr/genemap' #Needs arguments:url_, userListId_, query_string_, gene_
+enrichr_export = 'http://amp.pharm.mssm.edu/Enrichr/export' #Needs arguments:
+#### ADRESSES ####
 
 #### INPUT ####
 # input needs to be in a format 'HNF1A\nPCYT2\nSIGMAR1'
@@ -46,82 +120,49 @@ payload = {
 }
 #### INPUT ####
 
-#### ADD A LIST ####
-response_addlist = requests.post(enrichr_addlist, files=payload)
+#### DATABASES ####
+with open('enrichr_databases.txt', 'r') as f:
+    databases = f.read()
+
+databases = databases.split('\n')
+
+# test_databases = {'KEGG_2015', 'Reactome_2016'}
+#### DATABASES ####
+
+#### PREPARE A LIST ####
+response_addlist = requests.post(enrichr_addlist, files = payload)
 if not response_addlist.ok:
     raise Exception('Error analyzing gene list')
 
 data_response_addlist = json.loads(response_addlist.text)
 
 userListId = data_response_addlist['userListId']
-#### ADD A LIST ####
+#### PREPARE A LIST ####
 
-response_test = get_or_exception(url_ = enrichr_view, userListId_ = userListId)
+#### POSSIBLE GETS ####
+# response_test = get_or_exception(url_ = enrichr_view, userListId_ = userListId)
+# response_test = get_or_exception(url_ = enrichr_enrich, userListId_ = userListId, query_string_ = '?userListId=%s&backgroundType=%s', gene_set_library_ = 'KEGG_2015')
+# response_test = get_or_exception(url_ = enrichr_genemap, userListId_ = userListId, query_string_ = '?json=true&setup=true&gene=%s', gene_ = 'ALKBH2')
+# response_test = get_or_exception(url_ = enrichr_export, userListId_ = userListId, query_string_ = '?userListId=%s&filename=%s&backgroundType=%s', gene_set_library_ = 'KEGG_2015', filename_ = 'example_enrichment')
+#### POSSIBLE GETS ####
 
-
-
-
-def get_or_exception(url_ : str, userListId_ : str, ):
-    response_ = requests.get(url_ % userListId_)
-    if not response_.ok:
-        raise Exception('Error getting gene list')
-
-    data_ = json.loads(response_.text)
-    
-    return  data_
-
-
-ENRICHR_URL = 'http://amp.pharm.mssm.edu/Enrichr/enrich'
-query_string = '?userListId=%s&backgroundType=%s'
-user_list_id = userListId
-gene_set_library = 'KEGG_2015'
-response = requests.get(
-    ENRICHR_URL + query_string % (user_list_id, gene_set_library)
- )
-if not response.ok:
-    raise Exception('Error fetching enrichment results')
+##################
+#### METADATA ####
+##################
 
 
 
-data = json.loads(response.text)
+#################################
+#### CREATE MERGED DATAFRAME ####
+#################################
+merged_df = create_merged_df(userListId__ = userListId, databases_to_query_array = databases)
 
-app_json = json.dumps(data)
+df_ = df_.loc[df_[col_p_val] < p_val_cutoff]
+filtered_merged_df = filter_results(df_ = merged_df)
 
-test = pandas.DataFrame.from_dict(data)
-test2 = pandas.read_json(response.text, orient='table')
+filtered_merged_df.loc[:,'Overlap'] = filtered_merged_df['Overlap'].str.replace(pat = '/', repl = ' out of ')
 
-
-print(data)
-type(response.text)
-
-
-with open('test.json', 'w') as f:
-  json.dump(response.text, f)
-
-
-ENRICHR_URL = 'http://amp.pharm.mssm.edu/Enrichr/genemap'
-query_string = '?json=true&setup=true&gene=%s'
-gene = 'AKT1'
-response = requests.get(ENRICHR_URL + query_string % gene)
-if not response.ok:
-    raise Exception('Error searching for terms')
-
-data = json.loads(response.text)
-print(data)
-
-
-
-
-ENRICHR_URL = 'http://amp.pharm.mssm.edu/Enrichr/export'
-query_string = '?userListId=%s&filename=%s&backgroundType=%s'
-user_list_id = 363320
-filename = 'example_enrichment'
-gene_set_library = 'KEGG_2015'
-
-url = ENRICHR_URL + query_string % (user_list_id, filename, gene_set_library)
-response = requests.get(url, stream=True)
-
-with open(filename + '.txt', 'wb') as f:
-    for chunk in response.iter_content(chunk_size=1024):
-        if chunk:
-            f.write(chunk)
+filtered_merged_df.to_csv('annotation.tsv', sep = '\t', decimal = ',', index = False)
+#################################
+#### CREATE MERGED DATAFRAME ####
+#################################
