@@ -109,10 +109,11 @@ enrichr_export = 'http://amp.pharm.mssm.edu/Enrichr/export' #Needs arguments:
 
 #### INPUT ####
 # input needs to be in a format 'HNF1A\nPCYT2\nSIGMAR1'
-with open('enrichr_input.txt', 'r') as f:
+with open('enrichr_input_P___YB_YC1.txt', 'r') as f:
     input = f.read()
 
-description = 'hiroaki'
+description = 'silvio_P___YB_YC1'
+output_name = 'annotation' + description + '.tsv'
 
 payload = {
     'list': (None, input),
@@ -157,12 +158,12 @@ userListId = data_response_addlist['userListId']
 #################################
 merged_df = create_merged_df(userListId__ = userListId, databases_to_query_array = databases)
 
-df_ = df_.loc[df_[col_p_val] < p_val_cutoff]
+#df_ = df_.loc[df_[col_p_val] < p_val_cutoff]
 filtered_merged_df = filter_results(df_ = merged_df)
 
 filtered_merged_df.loc[:,'Overlap'] = filtered_merged_df['Overlap'].str.replace(pat = '/', repl = ' out of ')
 
-filtered_merged_df.to_csv('annotation.tsv', sep = '\t', decimal = ',', index = False)
+filtered_merged_df.to_csv(output_name, sep = '\t', decimal = ',', index = False)
 #################################
 #### CREATE MERGED DATAFRAME ####
 #################################
