@@ -109,10 +109,10 @@ enrichr_export = 'http://amp.pharm.mssm.edu/Enrichr/export' #Needs arguments:
 
 #### INPUT ####
 # input needs to be in a format 'HNF1A\nPCYT2\nSIGMAR1'
-with open('enrichr_input_P___YB_YC1.txt', 'r') as f:
+with open('enrichr_input.txt', 'r') as f:
     input = f.read()
 
-description = 'silvio_P___YB_YC1'
+description = 'enrichr'
 output_name = 'annotation' + description + '.tsv'
 
 payload = {
